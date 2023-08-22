@@ -196,7 +196,7 @@ mod tests {
         let mut population = Population::new(config, "test");
         assert_eq!(population.species.len(), 1);
         let outputs = population.evaluate(vec![vec![1.0], vec![0.4], vec![0.3], vec![0.5], vec![0.2]]);
-        assert_eq!(outputs.len(), 5);
+        assert_eq!(outputs.unwrap().len(), 5);
     }
 
     #[test]

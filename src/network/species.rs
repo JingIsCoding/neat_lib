@@ -36,8 +36,15 @@ impl Species {
     }
 
     pub fn get_top_genome(&mut self) -> Option<&mut Genome> {
-        self.sort_genomes();
-        self.get_genome_by_index(0)
+        let mut top_fitness = f64::MIN;
+        let mut top_geneme = None;
+        for genome in &mut self.genomes {
+            if genome.fitness > top_fitness {
+                top_fitness = genome.fitness;
+                top_geneme = Some(genome);
+            }
+        }
+        top_geneme
     }
 
     pub fn add_genome(&mut self, genome: Genome)  {
@@ -56,6 +63,7 @@ impl Species {
     }
 
     pub fn remove_weak_genomes(&mut self) {
+        self.sort_genomes();
         let survive_count = (self.genomes.len() / 2) + 1;
         let mut survived = vec![];
         for i in 0..survive_count {

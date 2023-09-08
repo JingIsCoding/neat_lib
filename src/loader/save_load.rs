@@ -55,11 +55,10 @@ impl Loader<config::Config> for FileSaverLoader {
 mod tests {
     use super::*;
     #[test]
-    fn test_saver() {
-        let config = config::Config::new(1, 2, 10);
+    fn test_save_load_config_and_population() {
+        let config = config::Config::default();
         let population = population::Population::new(config, "test");
         let saver = FileSaverLoader::new("./tmp/test");
-        saver.save(&population).expect("should work");
         saver.save(&population).expect("should work");
         let _: population::Population = saver.load().expect("should load");
     }

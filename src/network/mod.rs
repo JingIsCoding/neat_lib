@@ -6,6 +6,6 @@ pub mod gene;
 pub mod connection_gene;
 mod species;
 mod innovation_number;
-
-#[cfg(test)]
-mod xor;
+mod activation;
+mod attribute;
+mod math;

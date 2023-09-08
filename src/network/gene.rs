@@ -1,4 +1,7 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use crate::network::attribute::FloatAttribute;
+use crate::network::config::Config;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum GeneType {
@@ -9,25 +12,57 @@ pub enum GeneType {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Gene {
-    pub value: f64,
+    pub key: usize,
+    pub value: FloatAttribute,
+    pub bias: FloatAttribute,
+    pub response: FloatAttribute,
     pub gene_type: GeneType,
-    pub incoming_conns: Vec<usize>,
+    pub incoming_conns: HashSet<usize>,
+    config: Config
 }
 
 impl Gene {
-    pub fn new(gene_type: GeneType) -> Self {
-        Gene { value: 0.0, incoming_conns: vec![], gene_type }
+    pub fn new(config: Config, key: usize, gene_type: GeneType) -> Self {
+        Self::new_with_value(config, key,0.0, gene_type)
     }
 
-    pub fn new_with_value(value: f64, gene_type: GeneType) -> Self {
-        Gene { value, incoming_conns: vec![], gene_type }
+    pub fn new_with_value(config: Config, key: usize, value: f64, gene_type: GeneType) -> Self {
+        Gene { 
+            config,
+            key,
+            value: FloatAttribute::new(value), 
+            bias: FloatAttribute::new_norm(0.0, 1.0), 
+            response: FloatAttribute::new_norm(0.0, 1.0), 
+            incoming_conns: HashSet::new(), 
+            gene_type 
+        }
     }
 
-    pub fn add_incomming_conn(&mut self, incoming_conn: usize) {
-        self.incoming_conns.push(incoming_conn)
+    pub fn mutate(&mut self) {
+        self.bias.mutate(self.config.bias_replace_rate, self.config.bias_mutate_rate, self.config.bias_mutate_power, self.config.bias_min_value, self.config.bias_max_value, self.config.bias_init_mean, self.config.bias_init_stdev);
+        self.response.mutate(self.config.response_replace_rate, self.config.response_mutate_rate, self.config.response_mutate_power, self.config.response_min_value, self.config.response_max_value, self.config.response_init_mean, self.config.response_init_stdev);
     }
 
-    pub fn set_incomming_conns(&mut self, incoming_conns: Vec<usize>) {
-        self.incoming_conns = incoming_conns;
+    pub fn add_incomming_conn(&mut self, incoming_conn: usize) -> bool {
+        self.incoming_conns.insert(incoming_conn)
+    }
+
+    pub fn remove_incoming_conn(&mut self, incoming_conn: &usize) -> bool {
+        self.incoming_conns.remove(incoming_conn)
+    }
+
+    pub fn debug(&self) {
+        println!("Gene[ key:{:?} type:{:?} \tvalue:{:?} \tbias:{:?} \tresponse:{:?} \tincoming_conns:{:?} ]", self.key, self.gene_type, self.value, self.bias, self.response, self.incoming_conns);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_with_value() {
+        let config = Config::default();
+        let gene = Gene::new_with_value(config, 1, 0.0, GeneType::Input);
     }
 }

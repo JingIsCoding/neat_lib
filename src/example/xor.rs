@@ -4,7 +4,6 @@ use super::{population::*, config::*, genome::*};
 mod tests {
     use crate::{loader::save_load::{FileSaverLoader, Loader}};
     use std::io::{stdout, stdin, Write};
-
     use super::{Population, Config, Genome};
     const FILE_PATH: &str = "./tmp/xor";
     #[test]

@@ -65,7 +65,14 @@ impl Population {
             return Err(Errors::InputSizeNotMatch("Evalute inputs size not match genomes size".to_owned()))
         }
         for (index, inputs) in inputs.iter().enumerate() {
-           outputs[index] = genomes[index].evalute_network(inputs);
+            match genomes[index].evalute_network(inputs){
+                Ok(outputs_at_index) => {
+                    outputs[index] = outputs_at_index;
+                },
+                Err(err) => {
+                    return Err(err)
+                }
+            }
         }
         Ok(outputs)
     }
@@ -158,6 +165,40 @@ impl Population {
         self.generation += 1;
     }
 
+    fn calculate_pop_size_for_each_species(pop_size: usize, adjusted_fitnesses: Vec<f64>, species_pop_size: Vec<usize>, min_species_size: usize) -> Vec<usize> {
+        let sum = adjusted_fitnesses.iter().fold(0.0, |acc, fitness| {
+             acc + fitness
+        });
+        let mut new_species_pos_size = vec![];
+        for (adjusted_fitness, pre_size) in adjusted_fitnesses.iter().zip(species_pop_size.iter()) {
+            let mut species_size: i64 = 0;
+            if sum > 0.0 {
+                species_size = min_species_size.max((adjusted_fitness / sum * pop_size as f64) as usize) as i64;
+            }         
+            let d = (species_size - *pre_size as i64) as f64 * 0.5;
+            let c = d.round() as i64;
+            species_size = *pre_size as i64;
+            if c.abs() > 0 {
+                species_size += c;
+            } else if d > 0.0 {
+                species_size += 1;
+            } else if d < 0.0 {
+                species_size -= 1;
+            }
+            new_species_pos_size.push(species_size as usize);
+        }
+        let diff = pop_size as i64 - new_species_pos_size.iter().fold(0, | acc, size | acc + size ) as i64;
+        for i in 0..diff.abs() {
+            let index = i as usize % new_species_pos_size.len();
+            if diff > 0 {
+                new_species_pos_size[index] += 1;
+            } else {
+                new_species_pos_size[index] -= 1;
+            }
+        }
+        new_species_pos_size
+    }
+
     pub fn get_top_fitness(&mut self) -> (f64, Option<&mut Genome>) {
         let mut top_fitness = 0.0;
         let mut top_genomo = None;
@@ -185,14 +226,14 @@ mod tests {
     use super::super::config::Config;
     #[test]
     fn test_init_species() {
-        let config = Config::new(2, 1,10);
+        let config = Config::default();
         let population = Population::new(config, "test");
         assert_eq!(population.species.len(), 1);
     }
 
     #[test]
     fn test_evaluate() {
-        let config = Config::new(1, 1,5);
+        let config = Config::default();
         let mut population = Population::new(config, "test");
         assert_eq!(population.species.len(), 1);
         let outputs = population.evaluate(vec![vec![1.0], vec![0.4], vec![0.3], vec![0.5], vec![0.2]]);
@@ -201,7 +242,7 @@ mod tests {
 
     #[test]
     fn test_set_fitnesses() {
-        let config = Config::new(1, 1,5);
+        let config = Config::default();
         let mut population = Population::new(config, "test");
         let fitnesses = vec![0.1, 0.2, 0.3, 0.4, 0.5];
         population.set_fitness(vec![0.1, 0.2, 0.3, 0.4, 0.5]);
@@ -213,7 +254,7 @@ mod tests {
 
     #[test]
     fn test_check_progress_making_progress() {
-        let config = Config::new(1, 1, 10);
+        let config = Config::default();
         // higher fitness
         let mut species1 = Species::new(config);
         let mut genome1 = Genome::new(config);
@@ -250,7 +291,7 @@ mod tests {
 
     #[test]
     fn test_check_progress_not_making_progress() {
-        let config = Config::new(1, 1, 10);
+        let config = Config::default();
         // higher fitness
         let mut species1 = Species::new(config);
         let mut genome1 = Genome::new(config);
@@ -286,7 +327,7 @@ mod tests {
 
     #[test]
     fn test_remove_stale_species() {
-        let mut config = Config::new(1, 1, 10);
+        let mut config = Config::default();
         config.stale_species_threshold = 1;
         config.stale_population_threshold = 1;
 
@@ -341,7 +382,7 @@ mod tests {
 
     #[test]
     fn test_remove_stale_species_when_population_is_stale() {
-        let mut config = Config::new(1, 1, 10);
+        let mut config = Config::default();
         config.stale_species_threshold = 1;
         config.stale_population_threshold = 1;
 
@@ -394,7 +435,7 @@ mod tests {
 
     #[test]
     fn test_breed_new_generation() {
-        let config = Config::new(1, 1, 10);
+        let config = Config::default();
         let mut population = Population::new(config, "test");
         population.breed_new_generation();
         assert_eq!(population.generation, 2);

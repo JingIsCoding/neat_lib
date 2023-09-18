@@ -3,22 +3,22 @@ use std::collections::HashSet;
 use crate::network::attribute::FloatAttribute;
 use crate::network::config::Config;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum GeneType {
     Input,
     Output,
     Hidden,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Gene {
+    config: Config,
     pub key: usize,
     pub value: FloatAttribute,
     pub bias: FloatAttribute,
     pub response: FloatAttribute,
     pub gene_type: GeneType,
-    pub incoming_conns: HashSet<usize>,
-    config: Config
+    pub incoming_conns: HashSet<usize>
 }
 
 impl Gene {
@@ -50,9 +50,11 @@ impl Gene {
     pub fn remove_incoming_conn(&mut self, incoming_conn: &usize) -> bool {
         self.incoming_conns.remove(incoming_conn)
     }
+}
 
-    pub fn debug(&self) {
-        println!("Gene[ key:{:?} type:{:?} \tvalue:{:?} \tbias:{:?} \tresponse:{:?} \tincoming_conns:{:?} ]", self.key, self.gene_type, self.value, self.bias, self.response, self.incoming_conns);
+impl std::fmt::Debug for Gene {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Gene[ key:{:?} type:{:?} \tvalue:{:?} \tbias:{:?} \tresponse:{:?} \tincoming_conns:{:?} ]", self.key, self.gene_type, self.value, self.bias, self.response, self.incoming_conns)
     }
 }
 

@@ -84,8 +84,8 @@ impl Default for Config {
 
             weight_init_mean: 0.0, 
             weight_init_stdev: 1.0, 
-            weight_min_value: 30.0, 
-            weight_max_value: -30.0, 
+            weight_max_value: 30.0, 
+            weight_min_value: -30.0, 
             weight_mutation_step: 0.0, 
             weight_perturbed_chance: 0.0, 
             weight_mutation_chance: 0.5, 

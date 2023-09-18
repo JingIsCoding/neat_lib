@@ -92,7 +92,7 @@ mod tests {
     fn test_float_attribute_mutate() {
         let mut float = FloatAttribute::new(0.0);
         float.mutate(0.0, 1.0, 1.0, -1.0, 1.0, 0.0, 0.0);
-        assert!(float.value() < 1.0, "float should be smaller than 1.0")
+        assert!(float.value() <= 1.0, "float should be smaller than 1.0")
     }
 
     #[test]

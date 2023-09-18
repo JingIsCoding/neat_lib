@@ -8,3 +8,6 @@ pub use network::connection_gene::ConnectionGene;
 pub use network::config::*;
 pub use network::errors::*;
 pub use loader::save_load;
+
+//#[cfg(test)]
+//mod example;

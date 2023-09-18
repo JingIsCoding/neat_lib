@@ -1,4 +1,6 @@
-use super::{genome::Genome, config::Config};
+use std::vec;
+
+use super::{genome::{Genome, self}, config::Config};
 use serde::{Deserialize, Serialize};
 use rand::Rng;
 
@@ -7,6 +9,7 @@ pub struct Species {
     config: Config,
     pub genomes: Vec<Genome>,
     pub top_fitness: f64,
+    pub adjusted_fitness: f64,
     pub staleness: u32,
 }
 
@@ -16,12 +19,19 @@ impl Species {
             config,
             genomes: vec![],
             top_fitness: 0.0,
+            adjusted_fitness: 0.0,
             staleness: 0,
         }
     }
 
     pub fn new_from(species: &Species) -> Self {
-        Self { config: species.config, genomes: vec![], top_fitness: species.top_fitness, staleness: species.staleness }
+        Self { 
+            config: species.config, 
+            genomes: species.genomes.clone(), 
+            top_fitness: species.top_fitness, 
+            adjusted_fitness: species.adjusted_fitness, 
+            staleness: species.staleness 
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -35,16 +45,12 @@ impl Species {
         Some(&mut self.genomes[index])
     }
 
-    pub fn get_top_genome(&mut self) -> Option<&mut Genome> {
-        let mut top_fitness = f64::MIN;
-        let mut top_geneme = None;
-        for genome in &mut self.genomes {
-            if genome.fitness > top_fitness {
-                top_fitness = genome.fitness;
-                top_geneme = Some(genome);
-            }
-        }
-        top_geneme
+    pub fn get_top_genome_mut(&mut self) -> Option<&mut Genome> {
+        return self.genomes.iter_mut().reduce(| a, b | if a.fitness > b.fitness { a } else { b });
+    }
+
+    pub fn get_top_genome(&self) -> Option<&Genome> {
+        return self.genomes.iter().reduce(| a, b | if a.fitness > b.fitness { a } else { b });
     }
 
     pub fn add_genome(&mut self, genome: Genome)  {
@@ -72,7 +78,7 @@ impl Species {
 
     pub fn check_progress(&mut self) {
         let top_fitness = self.top_fitness;
-        if let Some(genomo) = self.get_top_genome() {
+        if let Some(genomo) = self.get_top_genome_mut() {
             if genomo.fitness > top_fitness {
                 self.top_fitness = genomo.fitness;
                 self.staleness = 0;
@@ -80,6 +86,22 @@ impl Species {
                 self.staleness += 1;
             }
         }
+    }
+
+    // resize species to the target size and return new genomes
+    pub fn reproduce_to_size(&mut self, target_size: usize) -> Vec<Genome> {
+        let mut children = vec![];
+        let cutoff = (self.genomes.len() as f64 * self.config.survival_threshold).ceil().max(self.config.min_species_size as f64) as usize;
+        let cutoff = cutoff.min(target_size);
+        if cutoff < self.genomes.len() {
+            self.sort_genomes();
+            self.genomes = self.genomes[..cutoff].to_vec();
+        }
+        let diff = target_size - self.genomes.len();
+        for _ in 0..diff {
+            children.push(self.breed_new_child());
+        } 
+        children
     }
 
     // assume the genomes are sorted
@@ -92,31 +114,15 @@ impl Species {
             let parent2 = &self.genomes[rng.gen_range(0..length)];
             Genome::cross_over(parent1, parent2)
         } else {
-            Genome::copy_from(&self.genomes[0], true)
+            Genome::new_from(&self.genomes[0], true)
         };
         child.mutate();
         child
     }
 
-    pub fn calculate_adjusted_fitness(&mut self) {
-        let length = self.genomes.len() as f64;
-        self.genomes.iter_mut().for_each(|genome| {
-            genome.adjusted_fitness = if genome.fitness > 0.0 {
-                genome.fitness / length
-            } else {
-                0.0
-            }
-        });
-    }
-
-    pub fn total_adjusted_fitness(&self) -> f64 {
-        self.genomes.iter().fold(0.0, | acc, genome | acc + genome.adjusted_fitness)
-    }
-
-    pub fn debug(&self) {
-        for genome in &self.genomes {
-            genome.debug();
-        }
+    pub fn calculate_adjusted_fitness(&mut self) -> f64 {
+        self.adjusted_fitness = (self.genomes.iter().map(|genome| genome.fitness).sum::<f64>() / self.genomes.len() as f64).max(0.0);
+        self.adjusted_fitness
     }
 }
 
@@ -142,25 +148,6 @@ mod tests {
         assert_eq!(species.genomes[0].fitness, 3.0);
         assert_eq!(species.genomes[1].fitness, 2.0);
         assert_eq!(species.genomes[2].fitness, 1.0);
-    }
-
-    #[test]
-    fn test_remove_weak_genomes(){
-        let config = Config::default();
-        let mut species = Species::new(config);
-        let mut genome1 = Genome::new(config);
-        genome1.fitness = 3.0;
-        let mut genome2 = Genome::new(config);
-        genome2.fitness = 1.0;
-        let mut genome3 = Genome::new(config);
-        genome3.fitness = 2.0;
-        species.genomes = vec![genome1, genome2, genome3];
-        species.sort_genomes();
-
-        species.remove_weak_genomes();
-
-        assert_eq!(species.genomes.len(), 1);
-        assert_eq!(species.genomes[0].fitness, 3.0);
     }
 
     #[test]
@@ -212,9 +199,6 @@ mod tests {
         species.genomes = vec![genome1, genome2, genome3];
         species.calculate_adjusted_fitness();
 
-        assert_eq!(species.genomes[0].adjusted_fitness, 1.0);
-        assert_eq!(species.genomes[1].adjusted_fitness, 1.0 / 3.0);
-        assert_eq!(species.genomes[2].adjusted_fitness, 2.0 / 3.0);
-        assert_eq!(species.total_adjusted_fitness(), 2.0);
+        assert_eq!(species.calculate_adjusted_fitness(), 2.0);
     }
 }

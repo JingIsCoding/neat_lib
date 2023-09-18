@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use crate::{network::attribute::FloatAttribute, Config};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct ConnectionGene {
     pub from: usize,
     pub to: usize,
@@ -25,3 +25,10 @@ impl ConnectionGene {
         println!("ConnectionGene[ from:{:?} \tto:{:?} \tinnoovation:{:?} \tweight:{:?} \tenabled:{:?} ]", self.from, self.to, self.innovation, self.weight, self.enabled);
     }
 }
+
+impl std::fmt::Debug for ConnectionGene {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ConnectionGene[ from:{:?} \tto:{:?} \tinnoovation:{:?} \tweight:{:?} \tenabled:{:?} ]", self.from, self.to, self.innovation, self.weight, self.enabled)
+    }
+}
+

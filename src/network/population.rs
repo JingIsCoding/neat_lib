@@ -9,7 +9,7 @@ use super::genome::Genome;
 use super::innovation_number::reset;
 use crate::network::errors::*;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Population {
     pub name: String,
     pub generation: u32,
@@ -36,9 +36,9 @@ impl Population {
 
     fn init_species(&mut self) {
         let mut seed = Genome::new(self.config);
-        seed.generate_network();
+        seed.minimal_network();
         for _ in 0..self.config.population {
-            let copy_gene = Genome::copy_from(&seed, false);
+            let copy_gene = Genome::new_from(&seed, false);
             self.add_to_species(copy_gene);
         }
     }
@@ -97,19 +97,16 @@ impl Population {
         })
     }
 
-    fn calculate_genome_adjusted_fitness(&mut self) {
+    fn calculate_species_adjusted_fitness(&mut self) {
         self.species.iter_mut()
-            .for_each(| species | species.calculate_adjusted_fitness());
+            .for_each(| species | {
+                species.calculate_adjusted_fitness();
+            });
     }
     
-    fn remove_weak_genome_from_species(&mut self) {
-        self.species.iter_mut().for_each(| species | species.remove_weak_genomes());
-    }
-
     fn remove_stale_species(&mut self) {
         self.species.iter_mut().for_each(| species | species.check_progress());
         self.check_progress();
-
         self.species.retain(| species | species.staleness < self.config.stale_species_threshold || species.top_fitness >= self.top_fitness );
         if self.staleness >= self.config.stale_population_threshold {
             self.species.retain(| species | species.top_fitness >= self.top_fitness )
@@ -127,82 +124,59 @@ impl Population {
     }
 
     pub fn breed_new_generation(&mut self) {
-        let population = self.config.population;
-        self.calculate_genome_adjusted_fitness();
         self.remove_stale_species();
-        self.remove_weak_genome_from_species();
-        let global_adjusted_fitness = self.species.iter().fold(0.0, | acc, species | acc + species.total_adjusted_fitness());
+        self.calculate_species_adjusted_fitness();
         let mut children = vec![];
-        let mut new_species = vec![];
-        let species_size = self.species.len();
-        for species in self.species.iter_mut() {
-            // keep the top genome in the species
-            let mut cloned_species = Species::new_from(species);
-            cloned_species.add_genome(Genome::copy_from(species.get_top_genome().unwrap(), true));
-            new_species.push(cloned_species);
-            let ratio: f64 = if global_adjusted_fitness == 0.0 {
-                1.0 / species_size as f64
-            } else {
-                species.total_adjusted_fitness() / global_adjusted_fitness
-            };
-            println!("raito is {:?}", ratio);
-            let child_num = (population as f64 * ratio) as i32;
-            for _ in 0..(child_num - 1) {
-                let child = species.breed_new_child();
-                children.push(child);
-            }
+        let species_sizes = Self::calculate_pop_size_for_each_species(&self.species, self.config.population as usize, self.config.min_species_size);
+        for (target_size, species) in species_sizes.iter().zip(&mut self.species) {
+           children.extend(species.reproduce_to_size(*target_size));
         }
-        let diff = population  - children.len() as u32;
-        for i in 0..diff {
-            let size = self.species.len();
-            children.push(self.species[i as usize % size].breed_new_child());
-        }
-        self.species = new_species;
         for child in children {
             self.add_to_species(child);
         }
-        assert!(self.all_genomes().len() == population as usize);
         self.generation += 1;
     }
 
-    fn calculate_pop_size_for_each_species(pop_size: usize, adjusted_fitnesses: Vec<f64>, species_pop_size: Vec<usize>, min_species_size: usize) -> Vec<usize> {
-        let sum = adjusted_fitnesses.iter().fold(0.0, |acc, fitness| {
-             acc + fitness
+    fn calculate_pop_size_for_each_species(species: &Vec<Species>, pop_size: usize, min_species_size: usize) -> Vec<usize> {
+        let adjusted_fitness_sum = species.iter().fold(0.0, |acc, species| {
+             acc + species.adjusted_fitness
         });
         let mut new_species_pos_size = vec![];
-        for (adjusted_fitness, pre_size) in adjusted_fitnesses.iter().zip(species_pop_size.iter()) {
-            let mut species_size: i64 = 0;
-            if sum > 0.0 {
-                species_size = min_species_size.max((adjusted_fitness / sum * pop_size as f64) as usize) as i64;
-            }         
-            let d = (species_size - *pre_size as i64) as f64 * 0.5;
-            let c = d.round() as i64;
-            species_size = *pre_size as i64;
-            if c.abs() > 0 {
-                species_size += c;
-            } else if d > 0.0 {
-                species_size += 1;
-            } else if d < 0.0 {
-                species_size -= 1;
-            }
+        for s in species {
+            let adjusted_fitness = s.adjusted_fitness;
+            let mut species_size: i64 = min_species_size as i64;
+            if adjusted_fitness_sum > 0.0 {
+                species_size = min_species_size.max((adjusted_fitness / adjusted_fitness_sum * pop_size as f64) as usize) as i64;
+            };
             new_species_pos_size.push(species_size as usize);
         }
-        let diff = pop_size as i64 - new_species_pos_size.iter().fold(0, | acc, size | acc + size ) as i64;
-        for i in 0..diff.abs() {
-            let index = i as usize % new_species_pos_size.len();
+        let mut diff = pop_size as i64 - new_species_pos_size.iter().fold(0, | acc, size | acc + size ) as i64;
+        let mut counter = 0;
+        while diff != 0 {
+            let index = counter as usize % new_species_pos_size.len();
             if diff > 0 {
                 new_species_pos_size[index] += 1;
+                diff -= 1;
             } else {
-                new_species_pos_size[index] -= 1;
+                if new_species_pos_size[index] > min_species_size {
+                    new_species_pos_size[index] -= 1;
+                    diff += 1;
+                } else {
+                    // every species is at min species size then give up.
+                    if !new_species_pos_size.iter().any(| size | *size > min_species_size) {
+                        break;
+                    }
+                }
             }
+            counter += 1;
         }
         new_species_pos_size
     }
 
-    pub fn get_top_fitness(&mut self) -> (f64, Option<&mut Genome>) {
+    pub fn get_top_fitness(&self) -> (f64, Option<&Genome>) {
         let mut top_fitness = 0.0;
         let mut top_genomo = None;
-        for species in &mut self.species {
+        for species in &self.species {
             if let Some(genome) = species.get_top_genome() {
                 if genome.fitness >= top_fitness {
                     top_fitness = genome.fitness;
@@ -219,6 +193,12 @@ impl Population {
     }
 }
 
+impl std::fmt::Debug for Population {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (_, genome) = self.get_top_fitness();
+        write!(f, "Generation {:?} \nTop fitness {:?}\nNum of species {:?}\nTop Genome {:?}\n", self.generation, self.top_fitness, self.species.len(), genome.unwrap())
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -233,16 +213,21 @@ mod tests {
 
     #[test]
     fn test_evaluate() {
-        let config = Config::default();
+        let mut config = Config::default();
+        config.inputs = 1;
+        config.population = 5;
         let mut population = Population::new(config, "test");
         assert_eq!(population.species.len(), 1);
         let outputs = population.evaluate(vec![vec![1.0], vec![0.4], vec![0.3], vec![0.5], vec![0.2]]);
-        assert_eq!(outputs.unwrap().len(), 5);
+        let outputs = outputs.unwrap();
+        assert_eq!(outputs.len(), 5);
+        println!("{:?}", outputs);
     }
 
     #[test]
     fn test_set_fitnesses() {
-        let config = Config::default();
+        let mut config = Config::default();
+        config.population = 5;
         let mut population = Population::new(config, "test");
         let fitnesses = vec![0.1, 0.2, 0.3, 0.4, 0.5];
         population.set_fitness(vec![0.1, 0.2, 0.3, 0.4, 0.5]);
@@ -439,6 +424,85 @@ mod tests {
         let mut population = Population::new(config, "test");
         population.breed_new_generation();
         assert_eq!(population.generation, 2);
+    }
+
+    #[test]
+    fn test_calculate_pop_size_for_each_species() {
+        let mut config = Config::default();
+        config.population = 100;
+
+        let mut population = Population::new(config, "test");
+
+        // only on species
+        population.species = vec![Species::new(config)];
+        population.species[0].adjusted_fitness = 0.0;
+        population.species[0].genomes = vec![Genome::new(config), Genome::new(config)];
+        let species_sizes = Population::calculate_pop_size_for_each_species(&population.species, 100, 2);
+        assert_eq!(species_sizes[0], 100);
+
+        // two species
+        population.species = vec![Species::new(config), Species::new(config)];
+        population.species[0].adjusted_fitness = 0.1;
+        population.species[0].genomes = vec![Genome::new(config), Genome::new(config)];
+
+        population.species[1].adjusted_fitness = 0.1;
+        population.species[1].genomes = vec![Genome::new(config), Genome::new(config)];
+        let species_sizes = Population::calculate_pop_size_for_each_species(&population.species, 100, 2);
+        assert_eq!(species_sizes[0], 50);
+        assert_eq!(species_sizes[1], 50);
+
+        // two species
+        population.species = vec![Species::new(config), Species::new(config)];
+        population.species[0].adjusted_fitness = 0.0;
+        population.species[0].genomes = vec![Genome::new(config), Genome::new(config)];
+
+        population.species[1].adjusted_fitness = 0.1;
+        population.species[1].genomes = vec![Genome::new(config), Genome::new(config)];
+        let species_sizes = Population::calculate_pop_size_for_each_species(&population.species, 100, 2);
+        assert_eq!(species_sizes[0], 2);
+        assert_eq!(species_sizes[1], 98);
+
+        // two species
+        population.species = vec![Species::new(config), Species::new(config)];
+        population.species[0].adjusted_fitness = 0.0;
+        population.species[0].genomes = vec![Genome::new(config), Genome::new(config)];
+
+        population.species[1].adjusted_fitness = 0.1;
+        population.species[1].genomes = vec![Genome::new(config), Genome::new(config)];
+        let species_sizes = Population::calculate_pop_size_for_each_species(&population.species, 4, 2);
+        assert_eq!(species_sizes[0], 2);
+        assert_eq!(species_sizes[1], 2);
+
+        // two species
+        population.species = vec![Species::new(config), Species::new(config)];
+        population.species[0].adjusted_fitness = 0.0;
+        population.species[0].genomes = vec![Genome::new(config), Genome::new(config)];
+
+        population.species[1].adjusted_fitness = 0.1;
+        population.species[1].genomes = vec![Genome::new(config), Genome::new(config)];
+        let species_sizes = Population::calculate_pop_size_for_each_species(&population.species, 3, 2);
+        assert_eq!(species_sizes[0], 2);
+        assert_eq!(species_sizes[1], 2);
+
+        population.species = vec![Species::new(config), Species::new(config)];
+        population.species[0].adjusted_fitness = 0.0;
+        population.species[0].genomes = vec![Genome::new(config), Genome::new(config)];
+
+        population.species[1].adjusted_fitness = 0.1;
+        population.species[1].genomes = vec![Genome::new(config), Genome::new(config)];
+        let species_sizes = Population::calculate_pop_size_for_each_species(&population.species, 3, 1);
+        assert_eq!(species_sizes[0], 1);
+        assert_eq!(species_sizes[1], 2);
+
+        population.species = vec![Species::new(config), Species::new(config)];
+        population.species[0].adjusted_fitness = 0.0;
+        population.species[0].genomes = vec![Genome::new(config), Genome::new(config)];
+
+        population.species[1].adjusted_fitness = 0.1;
+        population.species[1].genomes = vec![Genome::new(config), Genome::new(config)];
+        let species_sizes = Population::calculate_pop_size_for_each_species(&population.species, 99, 2);
+        assert_eq!(species_sizes[0], 2);
+        assert_eq!(species_sizes[1], 97);
     }
 }
 

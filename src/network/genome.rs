@@ -11,12 +11,11 @@ use super::{config::Config, gene::Gene, connection_gene::ConnectionGene};
 use crate::network::errors::Errors;
 use crate::network::activation::sigmod;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Genome {
     pub ref_id: uuid::Uuid,
     pub config: Config,
     pub fitness: f64,
-    pub adjusted_fitness: f64,
     // index to gene
     pub genes: HashMap<usize, Gene>,
     // innovation number to connection
@@ -25,17 +24,25 @@ pub struct Genome {
 
 impl Genome {
     pub fn new(config: Config) -> Self {
+        let mut genes = HashMap::new();
+        for i in 0..config.inputs {
+            let gene = Gene::new(config, i as usize, GeneType::Input);
+            genes.insert(gene.key, gene);
+        }
+        for i in config.inputs..(config.inputs + config.outputs) {
+            let gene = Gene::new(config, i as usize, GeneType::Output);
+            genes.insert(gene.key, gene);
+        }
         Genome { 
             config,
             ref_id: uuid::Uuid::new_v4(),
             fitness: 0.0,
-            adjusted_fitness: 0.0,
-            genes: HashMap::new(),
+            genes,
             connections: HashMap::new(),
         }
     }
 
-    pub fn copy_from(genome: &Genome, keep_id: bool) -> Self {
+    pub fn new_from(genome: &Genome, keep_id: bool) -> Self {
         let id = if keep_id {
             genome.ref_id
         } else {
@@ -44,8 +51,7 @@ impl Genome {
         Genome { 
             config: genome.config,
             ref_id: id,
-            fitness: genome.fitness,
-            adjusted_fitness: genome.adjusted_fitness,
+            fitness: 0.0,
             genes: genome.genes.clone(),
             connections: genome.connections.clone(),
         }
@@ -85,16 +91,45 @@ impl Genome {
     }
 
     pub fn cross_over(parent1: &Genome, parent2: &Genome) -> Self {
-        let mut rng = rand::thread_rng();
         let (best, second_best) = if parent1.fitness > parent2.fitness {
             (parent1, parent2)
         } else {
             (parent2, parent1)
         };
-        let mut genome = Self::new(parent1.config);
+        let mut child = Self::new(parent1.config);
+        Self::cross_over_genes(&mut child, best, second_best);
+        Self::cross_over_connections(&mut child, best, second_best);
+        child.minimal_network();
+        child.check_connections();
+        child
+    }
+
+    fn cross_over_genes(child: &mut Genome, best: &Genome, second_best: &Genome) {
+        let mut rng = rand::thread_rng();
+        let mut gene_keys: HashSet<&usize> = HashSet::new();
+        gene_keys.extend(best.genes.keys().collect::<Vec<&usize>>());
+        gene_keys.extend(second_best.genes.keys().collect::<Vec<&usize>>());
+        for key in gene_keys {
+            let gene = if best.genes.contains_key(key) && second_best.genes.contains_key(key) {
+                if rng.gen() {
+                    best.genes.get(key).unwrap().clone()
+                } else {
+                    second_best.genes.get(key).unwrap().clone()
+                }
+            } else if best.genes.contains_key(key) {
+                best.genes.get(key).unwrap().clone()
+            } else {
+                second_best.genes.get(key).unwrap().clone()
+            };
+            child.genes.insert(*key, gene);
+        }
+    }
+
+    fn cross_over_connections(child: &mut Genome, best: &Genome, second_best: &Genome) {
+        let mut rng = rand::thread_rng();
         let mut innovation_keys: HashSet<&usize> = HashSet::new();
-        innovation_keys.extend(parent1.connections.keys().collect::<Vec<&usize>>());
-        innovation_keys.extend(parent2.connections.keys().collect::<Vec<&usize>>());
+        innovation_keys.extend(best.connections.keys().collect::<Vec<&usize>>());
+        innovation_keys.extend(second_best.connections.keys().collect::<Vec<&usize>>());
         for innov in innovation_keys {
             let conn = if best.connections.contains_key(innov) && second_best.connections.contains_key(innov) {
                 let (best_node, second_node) = (best.connections.get(innov).unwrap(), second_best.connections.get(innov).unwrap());
@@ -112,43 +147,33 @@ impl Genome {
             } else {
                 second_best.connections.get(innov).unwrap().clone()
             };
-            genome.connections.insert(conn.innovation, conn);
+            child.add_connection(conn);
         }
-        genome.generate_network();
-        genome
     }
 
-    pub fn generate_network(&mut self) {
-        let mut rng = rand::thread_rng();
-        let (inputs, outputs) = (self.config.inputs as usize, self.config.outputs as usize);
-        self.genes.clear();
-        // input
-        for i in 0..inputs {
-            self.genes.insert(i,Gene::new(self.config,i, GeneType::Input));
-        }
-        // Bias
-        // self.genes.insert(self.config.inputs as usize, Gene::new(GeneType::Input));
-        //
-        // output
-        for i in inputs..(inputs + outputs) {
-            self.genes.insert(i,Gene::new(self.config,i, GeneType::Output));
-        }
-
+    pub fn minimal_network(&mut self) {
         //minimal network
         if self.connections.is_empty() {
-            for from in 0..inputs {
-                for to in inputs..(inputs + outputs) {
+            let mut rng = rand::thread_rng();
+            let inputs: Vec<usize> = self.genes.iter().filter(|(_, gene)| { gene.gene_type == GeneType::Input }).map(| (key, _) | { key.clone() }).collect();
+            let outputs: Vec<usize> = self.genes.iter().filter(|(_, gene)| { gene.gene_type == GeneType::Output }).map(| (key, _) | { key.clone() }).collect();
+            for from in &inputs {
+                for to in outputs.iter() {
                     let ran_weight = rng.gen_range(-0.1..0.1);
-                    self.add_connection(from, to, ran_weight)
+                    self.add_new_connection(*from, *to, ran_weight)
                 }
             }
         }
     }
 
-    fn add_connection(&mut self, from: usize, to: usize, weight: f64) {
-        let conn = ConnectionGene::new(self.config, from as usize, to as usize, innovation_number::next(), weight, true);
+    fn add_connection(&mut self, conn: ConnectionGene) {
         self.connections.insert(conn.innovation, conn);
-        self.genes.get_mut(&to).unwrap().add_incomming_conn(conn.innovation);
+        self.genes.get_mut(&conn.to).unwrap().add_incomming_conn(conn.innovation);
+    }
+
+    fn add_new_connection(&mut self, from: usize, to: usize, weight: f64) {
+        let conn = ConnectionGene::new(self.config, from as usize, to as usize, innovation_number::next(), weight, true);
+        self.add_connection(conn);
     }
 
     fn remove_connection(&mut self, innov: usize) {
@@ -162,37 +187,41 @@ impl Genome {
         if input_values.len() != self.config.inputs as usize {
             return Err(Errors::InputSizeNotMatch("evalute_network inputs number does not match".to_owned()));
         }
-
         for (_ ,gene) in &mut self.genes {
             gene.value.set_value(0.0)
         }
+        let mut inputs_keys: Vec<usize> = self.genes.iter().filter(| (_, gene) | gene.gene_type == GeneType::Input).map(| (key, _) | key.clone()).collect();
+        let mut hidden_keys: Vec<usize> = self.genes.iter().filter(| (_, gene) | gene.gene_type == GeneType::Hidden).map(| (key, _) | key.clone()).collect();
+        let mut outputs_keys: Vec<usize> = self.genes.iter().filter(| (_, gene) | gene.gene_type == GeneType::Output).map(| (key, _) | key.clone()).collect();
+        inputs_keys.sort();
+        hidden_keys.sort();
+        outputs_keys.sort();
 
-        let (inputs, outputs) = (self.config.inputs as usize, self.config.outputs as usize);
         let mut output_values = vec![0.0; self.config.outputs as usize];
         // put inputs into input nodes
-        for index in 0..inputs {
-            if let Some(gene) = self.genes.get_mut(&index) {
-                gene.value.set_value(input_values[index]);
+        for key in inputs_keys {
+            if let Some(gene) = self.genes.get_mut(&key) {
+                gene.value.set_value(input_values[key]);
             }
         }
 
         // evaluate hidden layer first
-        for i in (inputs + outputs)..self.genes.len() {
-            if let Err(err) = Self::evalute_gene_at(&i, &mut self.genes, &self.connections) {
+        for key in hidden_keys {
+            if let Err(err) = Self::evalute_gene_at(&key, &mut self.genes, &self.connections) {
                 return Err(err)
             }
         }
 
         // evaluate outputs
-        for i in inputs..(inputs + outputs) {
-            if let Err(err) = Self::evalute_gene_at(&i, &mut self.genes, &self.connections) {
+        for key in &outputs_keys {
+            if let Err(err) = Self::evalute_gene_at(key, &mut self.genes, &self.connections) {
                 return Err(err)
             }
         }
 
         // fill in output values
-        for i in inputs..(inputs + outputs) {
-            output_values[i - inputs] = self.genes.get(&i).unwrap().value.value();
+        for (index, key) in outputs_keys.iter().enumerate() {
+            output_values[index] = self.genes.get(key).unwrap().value.value();
         }
 
         Ok(output_values)
@@ -204,7 +233,11 @@ impl Genome {
             for conn_index in &gene.incoming_conns {
                 if let Some(conn) = connections.get(conn_index) {
                     if conn.enabled {
-                        aggregation += genes[&conn.from].value * conn.weight;
+                        if !genes.contains_key(&conn.from) {
+                            panic!("key not exist >> {:?}\n {:?} \n{:?}", conn.from, genes, connections);
+                        } else {
+                            aggregation += genes[&conn.from].value * conn.weight;
+                        }
                     }
                 } else {
                     return Err(Errors::ConnectionGeneNotExists(*conn_index));
@@ -224,21 +257,25 @@ impl Genome {
         'single_structural_mutate: {
             if rng.gen_range(0.0..1.0) < self.config.conn_add_chance {
                 self.mutate_add_conn();
+                self.check_connections();
                 break 'single_structural_mutate
             }
 
             if rng.gen_range(0.0..1.0) < self.config.conn_delete_chance {
                 self.mutate_remove_conn();
+                self.check_connections();
                 break 'single_structural_mutate
             }
 
             if rng.gen_range(0.0..1.0) < self.config.node_add_chance {
                 self.mutate_add_node();
+                self.check_connections();
                 break 'single_structural_mutate
             }
 
             if rng.gen_range(0.0..1.0) < self.config.node_delete_chance {
                 self.mutate_remove_node();
+                self.check_connections();
                 break 'single_structural_mutate
             }
         }
@@ -259,54 +296,65 @@ impl Genome {
 
     fn mutate_add_conn(&mut self) {
         let mut rng = rand::thread_rng();
-        let (inputs, _, size) = (self.config.inputs as usize, self.config.outputs as usize, self.genes.len());
-        let ran_node1 = rng.gen_range(0..size);
-        let ran_node2 = rng.gen_range(inputs..size);
-        if ran_node1 == ran_node2 {
+        let inputs: Vec<&usize> = self.genes.keys().collect();
+        let outputs: Vec<(&usize, &Gene)> = self.genes.iter().filter(| (_, gene) | {
+            gene.gene_type != GeneType::Input
+        }).collect();
+        let ran_index_1 = inputs[rng.gen_range(0..inputs.len())];
+        let ran_index_2 = outputs[rng.gen_range(0..outputs.len())].0;
+        if ran_index_1 == ran_index_2 {
             return
         }
-        let (from, to) = (min(ran_node1, ran_node2), max(ran_node1, ran_node2));
-        if self.try_connect(from, to) {
+        let (from, to) = (ran_index_1.min(ran_index_2), ran_index_1.max(ran_index_2));
+        if self.connections.iter_mut().any(| (_ , conn) | {
+            if conn.from == *from && conn.to == *to {
+                conn.enabled = true;
+                return true;
+            }
+            return false;
+        }) {
+            return
+        }
+        if self.try_connect(*from, *to) {
             return
         } 
     }
 
     fn mutate_remove_conn(&mut self) {
-        let mut rng = rand::thread_rng();
         let innovs: Vec<&usize> = self.connections.keys().collect();
         if innovs.is_empty() {
             return
         }
+        let mut rng = rand::thread_rng();
         self.remove_connection(innovs[rng.gen_range(0..innovs.len())].clone());
     }
 
     fn mutate_add_node(&mut self) {
-        let next_node = self.genes.len().clone();
-        let mut from: usize = 0;
-        let mut to: usize = 0;
-        let mut weight: FloatAttribute = FloatAttribute::new(0.0);
-        if let Some(conn) = self.find_random_connection() {
+        if let Some(innov) = self.find_random_connection() {
+            let conn = self.connections.get_mut(&innov).unwrap();
             conn.enabled = false;
-            self.add_node_on_conn(conn.from.clone(), conn.to.clone(), conn.weight.value())
-        } else {
-            return
-        }
+            let from = conn.from.clone();
+            let to = conn.to.clone();
+            let weight = conn.weight.value().clone();
+            self.add_node_on_conn(from, to, weight);
+        }     
     }
 
     fn add_node_on_conn(&mut self, from: usize, to: usize, weight: f64) {
-        let next_node = self.genes.len().clone();
+        let next_node = *self.genes.keys().max().unwrap() + 1;
         self.genes.insert(next_node, Gene::new(self.config, next_node, GeneType::Hidden));
-        self.add_connection(from, next_node, 1.0);
-        self.add_connection(next_node, to, weight);
+        self.add_new_connection(from, next_node, 1.0);
+        self.add_new_connection(next_node, to, weight);
     }
 
     fn mutate_remove_node(&mut self) {
-        let mut rng = rand::thread_rng();
-        if self.genes.len() == (self.config.inputs + self.config.outputs) as usize {
-            return;
+        let possible_nodes: Vec<(&usize, &Gene)> = self.genes.iter().filter(|(_, gene)| { gene.gene_type == GeneType::Hidden }).collect();
+        if possible_nodes.is_empty() {
+            return
         }
-        let to_delete = rng.gen_range((self.config.inputs as usize + self.config.outputs as usize)..self.genes.len());
-        self.remove_node(to_delete)
+        let mut rng = rand::thread_rng();
+        let to_delete = possible_nodes[rng.gen_range(0..possible_nodes.len())].0;
+        self.remove_node(*to_delete)
     }
 
     fn remove_node(&mut self, index: usize) {
@@ -337,19 +385,19 @@ impl Genome {
                 return false;
             }
         }
-        self.add_connection(from, to, rng.gen_range(-1.0..1.0));
+        self.add_new_connection(from, to, rng.gen_range(-1.0..1.0));
         true
     }
 
-    fn find_random_connection(&mut self) -> Option<&mut ConnectionGene> {
+    fn find_random_connection(&mut self) -> Option<usize> {
         let mut rng = rand::thread_rng();
         let keys = self.connections.keys().collect::<Vec<&usize>>();
         if keys.is_empty() {
             return None;
         }
         let randome_key = keys[rng.gen_range(0..keys.len())];
-        if let Some(connection) = self.connections.get_mut(&randome_key.clone()) {
-            return Some(connection);
+        if self.connections.contains_key(randome_key) {
+            return Some(randome_key.clone());
         }
         None
     }
@@ -366,13 +414,38 @@ impl Genome {
         }
     }
 
-    pub fn debug(&self) {
-        for (_ ,gene) in &self.genes {
-            gene.debug();
+    pub fn check_connections(&self) {
+        for (_, conn) in &self.connections {
+            if !self.genes.contains_key(&conn.from) {
+                panic!("from key not exists >> {:?}\n{:?}", conn.innovation, self);
+            } 
+            if !self.genes.contains_key(&conn.to) {
+                panic!("to key not exists >> {:?}\n{:?}", conn.innovation, self);
+            } 
+            if !self.genes.get(&conn.to).unwrap().incoming_conns.contains(&conn.innovation) {
+                panic!("gene does not have incoming conn >> {:?}\n{:?}", conn.innovation, self);
+            }
         }
-        for (_ ,conn) in &self.connections {
-            conn.debug();
-        }
+    }
+}
+
+impl std::fmt::Debug for Genome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug_content = String::new();
+
+        debug_content.push_str(format!("id:\t{:?}\nfitness:\t{:?}\n", self.ref_id, self.fitness).as_str());
+
+        let mut genes = self.genes.values().collect::<Vec<&Gene>>();
+        genes.sort_by_key(| gene | gene.key);
+        genes.iter().for_each(|gene| {
+            debug_content.push_str(format!("{:?}\n", gene).as_str());
+        });
+        let mut connections = self.connections.values().collect::<Vec<&ConnectionGene>>();
+        connections.sort_by_key(| gene | gene.innovation);
+        connections.iter().for_each(|conn| {
+            debug_content.push_str(format!("{:?}\n", conn).as_str());
+        });
+        write!(f, "{}", debug_content)
     }
 }
 
@@ -382,18 +455,21 @@ mod tests {
     use super::super::config::Config;
     #[test]
     fn test_genrates_networks() {
-        let config = Config::default();
+        let mut config = Config::default();
+        config.inputs = 1;
+        config.outputs = 1;
         let mut genome = Genome::new(config);
-        genome.generate_network();
+        genome.minimal_network();
         assert!(genome.genes.len() == 2);
         assert!(genome.connections.len() == 1);
     }
 
     #[test]
     fn test_evalute_minimal_network() {
-        let config = Config::default();
+        let mut config = Config::default();
+        config.outputs = 2;
         let mut genome = Genome::new(config);
-        genome.generate_network();
+        genome.minimal_network();
         let inputs = vec![2.0, 1.0];
         let outputs = genome.evalute_network(&inputs);
         assert_eq!(outputs.unwrap().len(), 2);
@@ -413,7 +489,7 @@ mod tests {
         config.inputs = 2;
         config.outputs = 2;
         let parent1 = Genome::new(config);
-        let parent2 = Genome::copy_from(&parent1, false);
+        let parent2 = Genome::new_from(&parent1, false);
         let child = Genome::cross_over(&parent1, &parent2);
         assert_eq!(child.genes.len(), 4);
         assert_eq!(child.connections.len(), 4);
@@ -421,11 +497,12 @@ mod tests {
 
     #[test]
     fn test_network_crossover() {
+        innovation_number::reset();
         let mut config = Config::default();
         config.inputs = 2;
         config.outputs = 2;
         let mut parent1 = Genome::new(config);
-        let mut parent2 = Genome::copy_from(&parent1, false);
+        let mut parent2 = Genome::new_from(&parent1, false);
         parent1.connections.insert(1, ConnectionGene::new(config,0, 1, 1, 0.1, true));
         parent1.connections.insert(2, ConnectionGene::new(config,0, 2, 2, 0.1, true));
 
@@ -434,29 +511,23 @@ mod tests {
         parent2.connections.insert(3, ConnectionGene::new(config,0, 3, 3, 0.2, true));
 
         let child = Genome::cross_over(&parent1, &parent2);
-        child.debug();
         assert_eq!(child.genes.len(), 4);
         assert_eq!(child.connections.len(), 3);
     }
 
     #[test]
     fn test_try_connect() {
+        innovation_number::reset();
         let mut config = Config::default();
         config.inputs = 2;
         config.outputs = 2;
         let mut genome = Genome::new(config);
-        genome.generate_network();
-        assert_eq!(genome.genes.len(), 4);
-        assert_eq!(genome.connections.len(), 4);
-
-        genome.remove_connection(0);
-        genome.debug();
-        assert_eq!(genome.connections.len(), 3);
-        let expected_incomming_conn: HashSet<usize> = vec![2 as usize].into_iter().clone().collect();
-        assert_eq!(genome.genes.get(&2).unwrap().incoming_conns, expected_incomming_conn, "");
-
         assert!(!genome.try_connect(0, 0));
-        assert!(!genome.try_connect(0, 3));
         assert!(genome.try_connect(0, 2));
+        assert_eq!(genome.connections.len(), 1);
+        assert_eq!(genome.connections.get(&1).unwrap().from, 0);
+        assert_eq!(genome.connections.get(&1).unwrap().to, 2);
+        assert_eq!(genome.genes.get(&(2 as usize)).unwrap().incoming_conns.len(), 1);
+        assert!(genome.genes.get(&(2 as usize)).unwrap().incoming_conns.contains(&1));
     }
 }

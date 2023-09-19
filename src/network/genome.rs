@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::cmp::{max, min};
+use std::cmp::min;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -183,7 +183,7 @@ impl Genome {
         })
     }
 
-    pub fn evalute_network(&mut self, input_values: &Vec<f64>) -> Result<Vec<f64>, Errors> {
+    pub fn evalute(&mut self, input_values: &Vec<f64>) -> Result<Vec<f64>, Errors> {
         if input_values.len() != self.config.inputs as usize {
             return Err(Errors::InputSizeNotMatch("evalute_network inputs number does not match".to_owned()));
         }
@@ -471,7 +471,7 @@ mod tests {
         let mut genome = Genome::new(config);
         genome.minimal_network();
         let inputs = vec![2.0, 1.0];
-        let outputs = genome.evalute_network(&inputs);
+        let outputs = genome.evalute(&inputs);
         assert_eq!(outputs.unwrap().len(), 2);
     }
 

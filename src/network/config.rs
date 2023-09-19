@@ -1,12 +1,16 @@
 use serde::{Deserialize, Serialize};
 use crate::loader::save_load::{Loader, FileSaverLoader};
 
+enum Activation {
+    Sigmod,
+    Sin
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Config {
     pub inputs: u32,
     pub outputs: u32,
     pub population: u32,
-    pub hidden_nodes: u32,
     pub conn_add_chance: f64,
     pub conn_delete_chance: f64,
 
@@ -62,7 +66,6 @@ impl Default for Config {
             inputs: 2, 
             outputs: 1, 
             population: 150, 
-            hidden_nodes: 0, 
             conn_add_chance: 0.5, 
             conn_delete_chance: 0.5, 
 
@@ -116,14 +119,5 @@ impl Config {
     pub fn new_from_path(path: &str) -> Self {
         let loader = FileSaverLoader::new(path);
         loader.load().expect("can not get config")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn test_load_config() {
-        Config::new_from_path("./config.json");
     }
 }

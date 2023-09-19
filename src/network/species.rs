@@ -1,6 +1,6 @@
 use std::vec;
 
-use super::{genome::{Genome, self}, config::Config};
+use super::{genome::Genome, config::Config};
 use serde::{Deserialize, Serialize};
 use rand::Rng;
 

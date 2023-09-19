@@ -65,7 +65,7 @@ impl Population {
             return Err(Errors::InputSizeNotMatch("Evalute inputs size not match genomes size".to_owned()))
         }
         for (index, inputs) in inputs.iter().enumerate() {
-            match genomes[index].evalute_network(inputs){
+            match genomes[index].evalute(inputs){
                 Ok(outputs_at_index) => {
                     outputs[index] = outputs_at_index;
                 },
@@ -114,7 +114,7 @@ impl Population {
     }
 
     fn check_progress(&mut self) {
-        let (top_fitness, _) = self.get_top_fitness();
+        let (top_fitness, _) = self.get_top_genome();
         if top_fitness > self.top_fitness {
             self.top_fitness = top_fitness;
             self.staleness = 0;
@@ -173,11 +173,25 @@ impl Population {
         new_species_pos_size
     }
 
-    pub fn get_top_fitness(&self) -> (f64, Option<&Genome>) {
+    pub fn get_top_genome(&self) -> (f64, Option<&Genome>) {
         let mut top_fitness = 0.0;
         let mut top_genomo = None;
         for species in &self.species {
             if let Some(genome) = species.get_top_genome() {
+                if genome.fitness >= top_fitness {
+                    top_fitness = genome.fitness;
+                    top_genomo = Some(genome);
+                }
+            }
+        }
+        return (top_fitness, top_genomo);
+    }
+
+    pub fn get_top_genome_mut(&mut self) -> (f64, Option<&mut Genome>) {
+        let mut top_fitness = 0.0;
+        let mut top_genomo = None;
+        for species in &mut self.species {
+            if let Some(genome) = species.get_top_genome_mut() {
                 if genome.fitness >= top_fitness {
                     top_fitness = genome.fitness;
                     top_genomo = Some(genome);
@@ -195,7 +209,7 @@ impl Population {
 
 impl std::fmt::Debug for Population {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (_, genome) = self.get_top_fitness();
+        let (_, genome) = self.get_top_genome();
         write!(f, "Generation {:?} \nTop fitness {:?}\nNum of species {:?}\nTop Genome {:?}\n", self.generation, self.top_fitness, self.species.len(), genome.unwrap())
     }
 }

@@ -1,11 +1,12 @@
 [package]
 name = "neat_lib"
-authors = "jing guo"
+authors = ["jing guo"]
 version = "0.1.0"
 edition = "2021"
 description  = "Rust implementation of NeuroEvolution of Augmenting Topologies"
-readme = "README"
-repository = "https://github.com/rust-lang/cargo/"
+readme = "README.md"
+repository = "https://github.com/JingIsCoding/neat_lib.git"
+license = "LICENSE"
 
 [lib]
 name = "neat_lib"

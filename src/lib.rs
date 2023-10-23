@@ -1,13 +1,12 @@
 mod loader;
-mod network;
+mod neat;
+mod nn;
 
-pub use network::population::Population;
-pub use network::genome::Genome;
-pub use network::gene::Gene;
-pub use network::connection_gene::ConnectionGene;
-pub use network::config::*;
-pub use network::errors::*;
+pub use neat::population::*;
+pub use neat::genome::Genome;
+pub use neat::gene::Gene;
+pub use neat::connection_gene::ConnectionGene;
+pub use neat::config::*;
+pub use neat::errors::*;
+pub use nn::*;
 pub use loader::save_load;
-
-//#[cfg(test)]
-//mod example;

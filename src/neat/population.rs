@@ -7,27 +7,42 @@ use super::species::Species;
 use super::config::Config;
 use super::genome::Genome;
 use super::innovation_number::reset;
-use crate::network::errors::*;
+use crate::neat::errors::*;
 
 #[derive(Serialize, Deserialize)]
 pub struct Population {
     pub name: String,
     pub generation: u32,
     pub top_fitness: f64,
+    pub top_genome: Option<Genome>,
     pub species: Vec<Species>,
     pub staleness: u32,
     config: Config,
 }
 
+pub struct EvaluteOption  {
+    pub epochs: u64,
+    pub fitness_target: Option<f64>
+}
+
+impl EvaluteOption {
+    pub fn new(epochs: u64) -> Self {
+        EvaluteOption { epochs, fitness_target: None }
+    }
+}
+
+pub type EvaluteFunc = fn(config: &Config, genome: &Genome) -> f64;
+
 impl Population {
-    pub fn new(config: Config, name: &str) -> Self {
+    pub fn new(config: &Config, name: &str) -> Self {
         reset();
         let mut pool = Population { 
             name: name.to_owned(),
-            config,
+            config: config.clone(),
             generation: 1,
             species: vec![],
             top_fitness: 0.0,
+            top_genome: None,
             staleness: 0,
         };
         pool.init_species();
@@ -35,7 +50,7 @@ impl Population {
     }
 
     fn init_species(&mut self) {
-        let mut seed = Genome::new(self.config);
+        let mut seed = Genome::new(&self.config);
         seed.minimal_network();
         for _ in 0..self.config.population {
             let copy_gene = Genome::new_from(&seed, false);
@@ -53,28 +68,31 @@ impl Population {
                 };
             }
         }
-        let mut new_species = Species::new(self.config);
+        let mut new_species = Species::new(&self.config);
         new_species.add_genome(genome);
         self.species.push(new_species);
     }
 
-    pub fn evaluate(&mut self, inputs: Vec<Vec<f64>>) -> Result<Vec<Vec<f64>>, Errors> {
-        let mut outputs = vec![vec![0.0; self.config.outputs as usize]; inputs.len()];
-        let mut genomes = self.all_genomes();
-        if inputs.len() != genomes.len() {
-            return Err(Errors::InputSizeNotMatch("Evalute inputs size not match genomes size".to_owned()))
-        }
-        for (index, inputs) in inputs.iter().enumerate() {
-            match genomes[index].evalute(inputs){
-                Ok(outputs_at_index) => {
-                    outputs[index] = outputs_at_index;
-                },
-                Err(err) => {
-                    return Err(err)
+    pub fn run(&mut self, evalute_func: EvaluteFunc, option: EvaluteOption) -> Result<Genome, Errors> {
+        let mut k = 0;
+        let config = self.config.clone();
+        while k < option.epochs {
+            k += 1;
+            let genomes = self.all_genomes();
+            for genome in genomes {
+                let fitness = evalute_func(&config, genome);
+                genome.fitness = fitness;
+                if let Some(fitness_target) = option.fitness_target {
+                    if fitness >= fitness_target {
+                        return Ok(genome.clone());
+                    }
                 }
             }
+            self.breed_new_generation()?;
+            println!("round {:?} {:?}", k, self.get_top_genome())
         }
-        Ok(outputs)
+        let (_, genome) = self.get_top_genome();
+        genome.ok_or(Errors::CanNotFindSolution())
     }
 
     pub fn set_fitness(&mut self, fitnesses: Vec<f64>) -> Result<(), Errors> {
@@ -109,32 +127,46 @@ impl Population {
         self.check_progress();
         self.species.retain(| species | species.staleness < self.config.stale_species_threshold || species.top_fitness >= self.top_fitness );
         if self.staleness >= self.config.stale_population_threshold {
-            self.species.retain(| species | species.top_fitness >= self.top_fitness )
+            self.species = vec![];
+            self.staleness = 0;
+            //self.species.retain(| species | species.top_fitness >= self.top_fitness )
         }
     }
 
     fn check_progress(&mut self) {
-        let (top_fitness, _) = self.get_top_genome();
+        let (top_fitness, genome) = self.get_top_genome();
         if top_fitness > self.top_fitness {
             self.top_fitness = top_fitness;
             self.staleness = 0;
+            self.top_genome = genome;
         } else {
             self.staleness += 1;
         }
     }
 
-    pub fn breed_new_generation(&mut self) {
-        self.remove_stale_species();
-        self.calculate_species_adjusted_fitness();
+    pub fn breed_new_generation(&mut self) -> Result<(), Errors> {
         let mut children = vec![];
-        let species_sizes = Self::calculate_pop_size_for_each_species(&self.species, self.config.population as usize, self.config.min_species_size);
-        for (target_size, species) in species_sizes.iter().zip(&mut self.species) {
-           children.extend(species.reproduce_to_size(*target_size));
+        self.remove_stale_species();
+        if self.species.is_empty() {
+            if let Some(genome) = self.top_genome.clone() {
+                for _ in 0..self.config.population {
+                    children.push(genome.clone());
+                }
+            } else {
+                return Err(Errors::PopulationExtinction());
+            }
+        } else {
+            self.calculate_species_adjusted_fitness();
+            let species_sizes = Self::calculate_pop_size_for_each_species(&self.species, self.config.population as usize, self.config.min_species_size);
+            for (target_size, species) in species_sizes.iter().zip(&mut self.species) {
+                children.extend(species.reproduce_to_size(*target_size));
+            }
         }
         for child in children {
             self.add_to_species(child);
         }
         self.generation += 1;
+        Ok(())
     }
 
     fn calculate_pop_size_for_each_species(species: &Vec<Species>, pop_size: usize, min_species_size: usize) -> Vec<usize> {
@@ -173,28 +205,14 @@ impl Population {
         new_species_pos_size
     }
 
-    pub fn get_top_genome(&self) -> (f64, Option<&Genome>) {
+    pub fn get_top_genome(&self) -> (f64, Option<Genome>) {
         let mut top_fitness = 0.0;
         let mut top_genomo = None;
         for species in &self.species {
             if let Some(genome) = species.get_top_genome() {
                 if genome.fitness >= top_fitness {
                     top_fitness = genome.fitness;
-                    top_genomo = Some(genome);
-                }
-            }
-        }
-        return (top_fitness, top_genomo);
-    }
-
-    pub fn get_top_genome_mut(&mut self) -> (f64, Option<&mut Genome>) {
-        let mut top_fitness = 0.0;
-        let mut top_genomo = None;
-        for species in &mut self.species {
-            if let Some(genome) = species.get_top_genome_mut() {
-                if genome.fitness >= top_fitness {
-                    top_fitness = genome.fitness;
-                    top_genomo = Some(genome);
+                    top_genomo = Some(genome.clone());
                 }
             }
         }
@@ -221,28 +239,15 @@ mod tests {
     #[test]
     fn test_init_species() {
         let config = Config::default();
-        let population = Population::new(config, "test");
+        let population = Population::new(&config, "test");
         assert_eq!(population.species.len(), 1);
-    }
-
-    #[test]
-    fn test_evaluate() {
-        let mut config = Config::default();
-        config.inputs = 1;
-        config.population = 5;
-        let mut population = Population::new(config, "test");
-        assert_eq!(population.species.len(), 1);
-        let outputs = population.evaluate(vec![vec![1.0], vec![0.4], vec![0.3], vec![0.5], vec![0.2]]);
-        let outputs = outputs.unwrap();
-        assert_eq!(outputs.len(), 5);
-        println!("{:?}", outputs);
     }
 
     #[test]
     fn test_set_fitnesses() {
         let mut config = Config::default();
         config.population = 5;
-        let mut population = Population::new(config, "test");
+        let mut population = Population::new(&config, "test");
         let fitnesses = vec![0.1, 0.2, 0.3, 0.4, 0.5];
         population.set_fitness(vec![0.1, 0.2, 0.3, 0.4, 0.5]);
         let genomes = population.all_genomes();
@@ -255,25 +260,26 @@ mod tests {
     fn test_check_progress_making_progress() {
         let config = Config::default();
         // higher fitness
-        let mut species1 = Species::new(config);
-        let mut genome1 = Genome::new(config);
+        let mut species1 = Species::new(&config);
+        let mut genome1 = Genome::new(&config);
         genome1.fitness = 4.0;
-        let mut genome2 = Genome::new(config);
+        let mut genome2 = Genome::new(&config);
         genome2.fitness = 1.0;
-        let mut genome3 = Genome::new(config);
+        let mut genome3 = Genome::new(&config);
         genome3.fitness = 2.0;
         species1.genomes = vec![genome1, genome2, genome3];
 
-        let mut species2 = Species::new(config);
-        let mut genome1 = Genome::new(config);
+        let mut species2 = Species::new(&config);
+        let mut genome1 = Genome::new(&config);
         genome1.fitness = 5.0;
-        let mut genome2 = Genome::new(config);
+        let mut genome2 = Genome::new(&config);
         genome2.fitness = 1.0;
-        let mut genome3 = Genome::new(config);
+        let mut genome3 = Genome::new(&config);
         genome3.fitness = 2.0;
         species2.genomes = vec![genome1, genome2, genome3];
 
         let mut population = Population{
+            top_genome: None,
             name: "test".to_owned(),
             config,
             generation: 0,
@@ -292,25 +298,26 @@ mod tests {
     fn test_check_progress_not_making_progress() {
         let config = Config::default();
         // higher fitness
-        let mut species1 = Species::new(config);
-        let mut genome1 = Genome::new(config);
+        let mut species1 = Species::new(&config);
+        let mut genome1 = Genome::new(&config);
         genome1.fitness = 4.0;
-        let mut genome2 = Genome::new(config);
+        let mut genome2 = Genome::new(&config);
         genome2.fitness = 1.0;
-        let mut genome3 = Genome::new(config);
+        let mut genome3 = Genome::new(&config);
         genome3.fitness = 2.0;
         species1.genomes = vec![genome1, genome2, genome3];
 
-        let mut species2 = Species::new(config);
-        let mut genome1 = Genome::new(config);
+        let mut species2 = Species::new(&config);
+        let mut genome1 = Genome::new(&config);
         genome1.fitness = 5.0;
-        let mut genome2 = Genome::new(config);
+        let mut genome2 = Genome::new(&config);
         genome2.fitness = 1.0;
-        let mut genome3 = Genome::new(config);
+        let mut genome3 = Genome::new(&config);
         genome3.fitness = 2.0;
         species2.genomes = vec![genome1, genome2, genome3];
 
         let mut population = Population{
+            top_genome: None,
             config,
             name: "test".to_owned(),
             generation: 0,
@@ -331,34 +338,34 @@ mod tests {
         config.stale_population_threshold = 1;
 
         // should become stale
-        let mut species1 = Species::new(config);
-        let mut genome1 = Genome::new(config);
+        let mut species1 = Species::new(&config);
+        let mut genome1 = Genome::new(&config);
         genome1.fitness = 4.0;
-        let mut genome2 = Genome::new(config);
+        let mut genome2 = Genome::new(&config);
         genome2.fitness = 1.0;
-        let mut genome3 = Genome::new(config);
+        let mut genome3 = Genome::new(&config);
         genome3.fitness = 2.0;
         species1.genomes = vec![genome1, genome2, genome3];
         species1.top_fitness = 5.0;
 
         // should not become stale
-        let mut species2 = Species::new(config);
-        let mut genome1 = Genome::new(config);
+        let mut species2 = Species::new(&config);
+        let mut genome1 = Genome::new(&config);
         genome1.fitness = 5.0;
-        let mut genome2 = Genome::new(config);
+        let mut genome2 = Genome::new(&config);
         genome2.fitness = 1.0;
-        let mut genome3 = Genome::new(config);
+        let mut genome3 = Genome::new(&config);
         genome3.fitness = 2.0;
         species2.genomes = vec![genome1, genome2, genome3];
         species2.top_fitness = 4.0;
 
         // should not become stale
-        let mut species3 = Species::new(config);
-        let mut genome1 = Genome::new(config);
+        let mut species3 = Species::new(&config);
+        let mut genome1 = Genome::new(&config);
         genome1.fitness = 6.0;
-        let mut genome2 = Genome::new(config);
+        let mut genome2 = Genome::new(&config);
         genome2.fitness = 1.0;
-        let mut genome3 = Genome::new(config);
+        let mut genome3 = Genome::new(&config);
         genome3.fitness = 2.0;
         species3.genomes = vec![genome1, genome2, genome3];
         species3.top_fitness = 4.0;
@@ -369,7 +376,8 @@ mod tests {
             generation: 0,
             top_fitness: 5.9,
             staleness: 0,
-            species: vec![species1, species2, species3]
+            species: vec![species1, species2, species3],
+            top_genome: None
         };
 
         population.remove_stale_species();
@@ -386,56 +394,49 @@ mod tests {
         config.stale_population_threshold = 1;
 
         // should become stale
-        let mut species1 = Species::new(config);
-        let mut genome1 = Genome::new(config);
+        let mut species1 = Species::new(&config);
+        let mut genome1 = Genome::new(&config);
         genome1.fitness = 4.0;
-        let mut genome2 = Genome::new(config);
+        let mut genome2 = Genome::new(&config);
         genome2.fitness = 1.0;
-        let mut genome3 = Genome::new(config);
+        let mut genome3 = Genome::new(&config);
         genome3.fitness = 2.0;
         species1.genomes = vec![genome1, genome2, genome3];
         species1.top_fitness = 5.0;
 
         // should not become stale
-        let mut species2 = Species::new(config);
-        let mut genome1 = Genome::new(config);
+        let mut species2 = Species::new(&config);
+        let mut genome1 = Genome::new(&config);
         genome1.fitness = 5.0;
-        let mut genome2 = Genome::new(config);
+        let mut genome2 = Genome::new(&config);
         genome2.fitness = 1.0;
-        let mut genome3 = Genome::new(config);
+        let mut genome3 = Genome::new(&config);
         genome3.fitness = 2.0;
         species2.genomes = vec![genome1, genome2, genome3];
         species2.top_fitness = 4.0;
 
         // should not become stale
-        let mut species3 = Species::new(config);
-        let mut genome1 = Genome::new(config);
+        let mut species3 = Species::new(&config);
+        let mut genome1 = Genome::new(&config);
         genome1.fitness = 6.0;
-        let mut genome2 = Genome::new(config);
+        let mut genome2 = Genome::new(&config);
         genome2.fitness = 1.0;
-        let mut genome3 = Genome::new(config);
+        let mut genome3 = Genome::new(&config);
         genome3.fitness = 2.0;
         species3.genomes = vec![genome1, genome2, genome3];
         species3.top_fitness = 4.0;
 
-        let mut population = Population{
-            config,
-            name: "test".to_owned(),
-            generation: 0,
-            top_fitness: 6.0,
-            staleness: 1,
-            species: vec![species1, species2, species3]
-        };
-
+        let mut population = Population::new(&config, "test");
+        population.species = vec![species1, species2, species3];
         population.remove_stale_species();
-        assert_eq!(population.species.len(), 1);
+        assert_eq!(population.species.len(), 2);
         assert_eq!(population.species[0].top_fitness, 6.0);
     }
 
     #[test]
     fn test_breed_new_generation() {
         let config = Config::default();
-        let mut population = Population::new(config, "test");
+        let mut population = Population::new(&config, "test");
         population.breed_new_generation();
         assert_eq!(population.generation, 2);
     }
@@ -445,78 +446,77 @@ mod tests {
         let mut config = Config::default();
         config.population = 100;
 
-        let mut population = Population::new(config, "test");
+        let mut population = Population::new(&config, "test");
 
         // only on species
-        population.species = vec![Species::new(config)];
+        population.species = vec![Species::new(&config)];
         population.species[0].adjusted_fitness = 0.0;
-        population.species[0].genomes = vec![Genome::new(config), Genome::new(config)];
+        population.species[0].genomes = vec![Genome::new(&config), Genome::new(&config)];
         let species_sizes = Population::calculate_pop_size_for_each_species(&population.species, 100, 2);
         assert_eq!(species_sizes[0], 100);
 
         // two species
-        population.species = vec![Species::new(config), Species::new(config)];
+        population.species = vec![Species::new(&config), Species::new(&config)];
         population.species[0].adjusted_fitness = 0.1;
-        population.species[0].genomes = vec![Genome::new(config), Genome::new(config)];
+        population.species[0].genomes = vec![Genome::new(&config), Genome::new(&config)];
 
         population.species[1].adjusted_fitness = 0.1;
-        population.species[1].genomes = vec![Genome::new(config), Genome::new(config)];
+        population.species[1].genomes = vec![Genome::new(&config), Genome::new(&config)];
         let species_sizes = Population::calculate_pop_size_for_each_species(&population.species, 100, 2);
         assert_eq!(species_sizes[0], 50);
         assert_eq!(species_sizes[1], 50);
 
         // two species
-        population.species = vec![Species::new(config), Species::new(config)];
+        population.species = vec![Species::new(&config), Species::new(&config)];
         population.species[0].adjusted_fitness = 0.0;
-        population.species[0].genomes = vec![Genome::new(config), Genome::new(config)];
+        population.species[0].genomes = vec![Genome::new(&config), Genome::new(&config)];
 
         population.species[1].adjusted_fitness = 0.1;
-        population.species[1].genomes = vec![Genome::new(config), Genome::new(config)];
+        population.species[1].genomes = vec![Genome::new(&config), Genome::new(&config)];
         let species_sizes = Population::calculate_pop_size_for_each_species(&population.species, 100, 2);
         assert_eq!(species_sizes[0], 2);
         assert_eq!(species_sizes[1], 98);
 
         // two species
-        population.species = vec![Species::new(config), Species::new(config)];
+        population.species = vec![Species::new(&config), Species::new(&config)];
         population.species[0].adjusted_fitness = 0.0;
-        population.species[0].genomes = vec![Genome::new(config), Genome::new(config)];
+        population.species[0].genomes = vec![Genome::new(&config), Genome::new(&config)];
 
         population.species[1].adjusted_fitness = 0.1;
-        population.species[1].genomes = vec![Genome::new(config), Genome::new(config)];
+        population.species[1].genomes = vec![Genome::new(&config), Genome::new(&config)];
         let species_sizes = Population::calculate_pop_size_for_each_species(&population.species, 4, 2);
         assert_eq!(species_sizes[0], 2);
         assert_eq!(species_sizes[1], 2);
 
         // two species
-        population.species = vec![Species::new(config), Species::new(config)];
+        population.species = vec![Species::new(&config), Species::new(&config)];
         population.species[0].adjusted_fitness = 0.0;
-        population.species[0].genomes = vec![Genome::new(config), Genome::new(config)];
+        population.species[0].genomes = vec![Genome::new(&config), Genome::new(&config)];
 
         population.species[1].adjusted_fitness = 0.1;
-        population.species[1].genomes = vec![Genome::new(config), Genome::new(config)];
+        population.species[1].genomes = vec![Genome::new(&config), Genome::new(&config)];
         let species_sizes = Population::calculate_pop_size_for_each_species(&population.species, 3, 2);
         assert_eq!(species_sizes[0], 2);
         assert_eq!(species_sizes[1], 2);
 
-        population.species = vec![Species::new(config), Species::new(config)];
+        population.species = vec![Species::new(&config), Species::new(&config)];
         population.species[0].adjusted_fitness = 0.0;
-        population.species[0].genomes = vec![Genome::new(config), Genome::new(config)];
+        population.species[0].genomes = vec![Genome::new(&config), Genome::new(&config)];
 
         population.species[1].adjusted_fitness = 0.1;
-        population.species[1].genomes = vec![Genome::new(config), Genome::new(config)];
+        population.species[1].genomes = vec![Genome::new(&config), Genome::new(&config)];
         let species_sizes = Population::calculate_pop_size_for_each_species(&population.species, 3, 1);
         assert_eq!(species_sizes[0], 1);
         assert_eq!(species_sizes[1], 2);
 
-        population.species = vec![Species::new(config), Species::new(config)];
+        population.species = vec![Species::new(&config), Species::new(&config)];
         population.species[0].adjusted_fitness = 0.0;
-        population.species[0].genomes = vec![Genome::new(config), Genome::new(config)];
+        population.species[0].genomes = vec![Genome::new(&config), Genome::new(&config)];
 
         population.species[1].adjusted_fitness = 0.1;
-        population.species[1].genomes = vec![Genome::new(config), Genome::new(config)];
+        population.species[1].genomes = vec![Genome::new(&config), Genome::new(&config)];
         let species_sizes = Population::calculate_pop_size_for_each_species(&population.species, 99, 2);
         assert_eq!(species_sizes[0], 2);
         assert_eq!(species_sizes[1], 97);
     }
 }
-

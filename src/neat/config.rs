@@ -1,12 +1,8 @@
 use serde::{Deserialize, Serialize};
 use crate::loader::save_load::{Loader, FileSaverLoader};
 
-enum Activation {
-    Sigmod,
-    Sin
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     pub inputs: u32,
     pub outputs: u32,
@@ -58,6 +54,9 @@ pub struct Config {
     pub elitism: usize,
     pub survival_threshold: f64,
     pub min_species_size: usize,
+
+    pub activation_func: String,
+    pub aggregation_func: String,
 }
 
 impl Default for Config {
@@ -95,8 +94,8 @@ impl Default for Config {
             weight_mutation_power: 0.8, 
             weight_replace_chance: 0.1, 
 
-            node_add_chance: 0.2, 
-            node_delete_chance: 0.2, 
+            node_add_chance: 0.3, 
+            node_delete_chance: 0.3, 
 
             disable_mutation_chance: 0.05, 
             enabled_mutation_chance: 0.05, 
@@ -111,6 +110,9 @@ impl Default for Config {
             elitism: 2,
             survival_threshold: 0.2,
             min_species_size: 2,
+
+            activation_func: "sigmod".to_owned(),
+            aggregation_func: "sum".to_owned(),
         }
     }
 }
@@ -119,5 +121,24 @@ impl Config {
     pub fn new_from_path(path: &str) -> Self {
         let loader = FileSaverLoader::new(path);
         loader.load().expect("can not get config")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+    #[test]
+    fn test_default() {
+        let config = Config::default();
+        assert_eq!(config.inputs, 2);
+        assert_eq!(config.node_add_chance, 0.3);
+    }
+
+    #[test]
+    fn test_new_from_path() {
+        let config = Config::new_from_path("src/neat/test_config_1.json");
+        assert_eq!(config.inputs, 2);
+        assert_eq!(config.node_add_chance, 0.5);
+        assert_eq!(config.activation_func, "sigmod");
     }
 }

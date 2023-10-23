@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use crate::network::math::clamp;
+use crate::neat::math::clamp;
 use rand_distr::{Normal, Distribution};
 use std::ops::{Add, Sub, Mul, Div, AddAssign};
 use rand::Rng;

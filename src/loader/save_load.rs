@@ -1,4 +1,4 @@
-use crate::network::*;
+use crate::neat::*;
 use serde_json;
 use std::fs::{File, OpenOptions, read_to_string};
 use std::io::prelude::*;
@@ -57,7 +57,7 @@ mod tests {
     #[test]
     fn test_save_load_config_and_population() {
         let config = config::Config::default();
-        let population = population::Population::new(config, "test");
+        let population = population::Population::new(&config, "test");
         let saver = FileSaverLoader::new("./tmp/test");
         saver.save(&population).expect("should work");
         let _: population::Population = saver.load().expect("should load");

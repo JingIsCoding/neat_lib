@@ -7,6 +7,8 @@ pub enum Errors {
     InputSizeNotMatch(String),
     GeneNotExists(usize),
     ConnectionGeneNotExists(usize),
+    PopulationExtinction(),
+    CanNotFindSolution()
 }
 
 impl Error for Errors {}
@@ -18,6 +20,8 @@ impl fmt::Display for Errors {
             Errors::InputSizeNotMatch(details) => write!(f, "Input error: {}", details),
             Errors::GeneNotExists(index) => write!(f, "Gene #{} Does Not Exist", index),
             Errors::ConnectionGeneNotExists(innov) => write!(f, "Connection Gene #{} Does Not Exist", innov),
+            Errors::PopulationExtinction() => write!(f, "Population has extincted"),
+            Errors::CanNotFindSolution() => write!(f, "Can not find solution"),
         }
     }
 }

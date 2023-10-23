@@ -6,6 +6,7 @@ pub mod gene;
 pub mod connection_gene;
 mod species;
 mod innovation_number;
-mod activation;
+pub(crate) mod activation;
+pub(crate) mod aggregation;
 mod attribute;
 mod math;

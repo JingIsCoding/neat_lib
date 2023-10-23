@@ -14,9 +14,9 @@ pub struct Species {
 }
 
 impl Species {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: &Config) -> Self {
         Species { 
-            config,
+            config: config.clone(),
             genomes: vec![],
             top_fitness: 0.0,
             adjusted_fitness: 0.0,
@@ -26,7 +26,7 @@ impl Species {
 
     pub fn new_from(species: &Species) -> Self {
         Self { 
-            config: species.config, 
+            config: species.config.clone(), 
             genomes: species.genomes.clone(), 
             top_fitness: species.top_fitness, 
             adjusted_fitness: species.adjusted_fitness, 
@@ -134,12 +134,12 @@ mod tests {
     #[test]
     fn test_sort_genomes(){
         let config = Config::default();
-        let mut species = Species::new(config);
-        let mut genome1 = Genome::new(config);
+        let mut species = Species::new(&config);
+        let mut genome1 = Genome::new(&config);
         genome1.fitness = 3.0;
-        let mut genome2 = Genome::new(config);
+        let mut genome2 = Genome::new(&config);
         genome2.fitness = 1.0;
-        let mut genome3 = Genome::new(config);
+        let mut genome3 = Genome::new(&config);
         genome3.fitness = 2.0;
         species.genomes = vec![genome1, genome2, genome3];
 
@@ -154,12 +154,12 @@ mod tests {
     fn test_check_progress_making_progress() {
         let config = Config::default();
         // higher fitness
-        let mut species = Species::new(config);
-        let mut genome1 = Genome::new(config);
+        let mut species = Species::new(&config);
+        let mut genome1 = Genome::new(&config);
         genome1.fitness = 3.0;
-        let mut genome2 = Genome::new(config);
+        let mut genome2 = Genome::new(&config);
         genome2.fitness = 1.0;
-        let mut genome3 = Genome::new(config);
+        let mut genome3 = Genome::new(&config);
         genome3.fitness = 2.0;
         species.genomes = vec![genome1, genome2, genome3];
         species.check_progress();
@@ -171,13 +171,13 @@ mod tests {
     fn test_check_progress_not_making_progress() {
         let config = Config::default();
         // higher fitness
-        let mut species = Species::new(config);
+        let mut species = Species::new(&config);
         species.top_fitness = 4.0;
-        let mut genome1 = Genome::new(config);
+        let mut genome1 = Genome::new(&config);
         genome1.fitness = 3.0;
-        let mut genome2 = Genome::new(config);
+        let mut genome2 = Genome::new(&config);
         genome2.fitness = 1.0;
-        let mut genome3 = Genome::new(config);
+        let mut genome3 = Genome::new(&config);
         genome3.fitness = 2.0;
         species.genomes = vec![genome1, genome2, genome3];
         species.check_progress();
@@ -189,12 +189,12 @@ mod tests {
     fn test_check_calculate_adjusted_fitness() {
         let config = Config::default();
         // higher fitness
-        let mut species = Species::new(config);
-        let mut genome1 = Genome::new(config);
+        let mut species = Species::new(&config);
+        let mut genome1 = Genome::new(&config);
         genome1.fitness = 3.0;
-        let mut genome2 = Genome::new(config);
+        let mut genome2 = Genome::new(&config);
         genome2.fitness = 1.0;
-        let mut genome3 = Genome::new(config);
+        let mut genome3 = Genome::new(&config);
         genome3.fitness = 2.0;
         species.genomes = vec![genome1, genome2, genome3];
         species.calculate_adjusted_fitness();

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use crate::network::attribute::FloatAttribute;
-use crate::network::config::Config;
+use crate::neat::attribute::FloatAttribute;
+use crate::neat::config::Config;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum GeneType {
@@ -22,13 +22,13 @@ pub struct Gene {
 }
 
 impl Gene {
-    pub fn new(config: Config, key: usize, gene_type: GeneType) -> Self {
+    pub fn new(config: &Config, key: usize, gene_type: GeneType) -> Self {
         Self::new_with_value(config, key,0.0, gene_type)
     }
 
-    pub fn new_with_value(config: Config, key: usize, value: f64, gene_type: GeneType) -> Self {
+    pub fn new_with_value(config: &Config, key: usize, value: f64, gene_type: GeneType) -> Self {
         Gene { 
-            config,
+            config: config.clone(),
             key,
             value: FloatAttribute::new(value), 
             bias: FloatAttribute::new_norm(0.0, 1.0), 
@@ -65,6 +65,6 @@ mod tests {
     #[test]
     fn test_new_with_value() {
         let config = Config::default();
-        let gene = Gene::new_with_value(config, 1, 0.0, GeneType::Input);
+        let gene = Gene::new_with_value(&config, 1, 0.0, GeneType::Input);
     }
 }

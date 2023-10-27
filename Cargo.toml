@@ -1,7 +1,7 @@
 [package]
 name = "neat_lib"
 authors = ["jing guo"]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description  = "Rust implementation of NeuroEvolution of Augmenting Topologies"
 readme = "README.md"

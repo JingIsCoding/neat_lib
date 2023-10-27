@@ -89,10 +89,9 @@ impl Population {
                 }
             }
             self.breed_new_generation()?;
-            println!("round {:?} {:?}", k, self.get_top_genome())
+            println!("round {:?} top fitness:{:?} species: {:?}", k, self.top_fitness, self.species.len());
         }
-        let (_, genome) = self.get_top_genome();
-        genome.ok_or(Errors::CanNotFindSolution())
+        Err(Errors::CanNotFindSolution())
     }
 
     pub fn set_fitness(&mut self, fitnesses: Vec<f64>) -> Result<(), Errors> {

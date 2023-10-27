@@ -1,6 +1,8 @@
 extern crate neat_lib;
 
 use neat_lib::*;
+use neat_lib::save_load::*;
+
 const FILE_PATH: &str = "./tmp/xor";
 const MAX_ROUND: u32 = 1500;
 
@@ -26,7 +28,9 @@ fn main() {
     let mut pop = Population::new(&config, "xor");
     match pop.run(evalute, EvaluteOption { epochs: 500, fitness_target: Some(3.6) }){
         Ok(genome) => {
-            print!("top genome {:?}", genome);
+            let saver = FileSaverLoader::new(FILE_PATH);
+            let _ = saver.save(&pop);
+            print!("Problem solved {:?}", genome);
         },
         Err(err) => {
             println!("Failed to solve the problem.");

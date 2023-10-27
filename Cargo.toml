@@ -6,7 +6,7 @@ edition = "2021"
 description  = "Rust implementation of NeuroEvolution of Augmenting Topologies"
 readme = "README.md"
 repository = "https://github.com/JingIsCoding/neat_lib.git"
-license = "LICENSE"
+license = "MIT"
 
 [lib]
 name = "neat_lib"
